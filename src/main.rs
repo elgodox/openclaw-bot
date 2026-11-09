@@ -48,6 +48,16 @@ fn attach_console() {}
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--version") {
+        attach_console();
+        println!("OpenClaw Bot {}", update::CURRENT);
+        std::process::exit(0);
+    }
+    if args.iter().any(|a| a == "--update-now") {
+        attach_console();
+        update::cleanup();
+        std::process::exit(update::run_cli());
+    }
     if args.iter().any(|a| a == "--probe" || a == "--probe-admin") {
         attach_console();
         std::process::exit(probe::run(&args));

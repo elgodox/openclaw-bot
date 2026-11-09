@@ -138,13 +138,10 @@ impl Updater {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = (|| {
-                let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-                let fresh = sibling(&exe, "new");
-                download(&asset.browser_download_url, &fresh, |done, total| {
+                let exe = replace_self(&asset, |done, total| {
                     set(&state, State::Downloading { version: version.clone(), done, total });
                     ctx.request_repaint();
                 })?;
-                swap_in(&exe, &fresh)?;
                 set(&state, State::Restarting);
                 ctx.request_repaint();
                 let mut cmd = std::process::Command::new(&exe);
@@ -164,6 +161,49 @@ impl Updater {
                 }
             }
         });
+    }
+}
+
+/// Downloads `asset` and puts it in place of the running program file.
+/// Returns that path; the running copy keeps working until it exits.
+pub fn replace_self(asset: &Asset, progress: impl FnMut(u64, u64)) -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let fresh = sibling(&exe, "new");
+    download(&asset.browser_download_url, &fresh, progress)?;
+    swap_in(&exe, &fresh)?;
+    Ok(exe)
+}
+
+/// `--update-now`: the same update without a window. Exit code 0 when up to
+/// date or updated.
+pub fn run_cli() -> i32 {
+    println!("OpenClaw Bot {CURRENT}");
+    let release = match latest_release() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    if !is_newer(&release.tag_name, CURRENT) {
+        println!("Ya tienes la última versión ({}).", release.tag_name);
+        return 0;
+    }
+    let Some(asset) = release.program() else {
+        eprintln!("La versión {} no trae un programa para Windows.", release.tag_name);
+        return 1;
+    };
+    println!("Descargando {} ({})…", release.tag_name, asset.name);
+    match replace_self(asset, |_, _| {}) {
+        Ok(exe) => {
+            println!("Actualizado a {} en {}", release.tag_name, exe.display());
+            crate::setup::refresh_registered_version();
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
     }
 }
 
