@@ -1231,8 +1231,11 @@ impl App {
         }
         self.store.delete(&p.secret_key());
         self.settings.profiles.retain(|p| p.id != id);
+        if self.settings.profiles.is_empty() {
+            self.settings.profiles.push(crate::settings::Profile::local());
+        }
         if self.settings.active == id {
-            self.settings.active = "local".into();
+            self.settings.active = self.settings.profiles[0].id.clone();
             self.settings.save();
             self.connect(ctx);
         } else {

@@ -184,6 +184,12 @@ pub struct Found {
     pub has_config: bool,
     pub gateway_up: bool,
     pub port: u16,
+    /// `gateway.mode = "remote"`: the address of the other computer's
+    /// gateway this one is a node of. Such a computer never gets a gateway.
+    pub node_of: Option<String>,
+    pub node_token: Option<String>,
+    /// The app already has connections to other computers saved.
+    pub has_remote_profiles: bool,
 }
 
 // ---- the plan ---------------------------------------------------------------
@@ -289,14 +295,16 @@ pub fn build_plan(o: &Options, found: &Found, advanced: Option<(Value, Vec<Strin
         }
     }
     let changed_service_settings = o.change_gateway || fresh;
-    if o.service && changed_service_settings {
+    if found.node_of.is_some() && !o.change_gateway {
+        // A node of another computer's gateway: there is nothing to turn on here.
+    } else if o.service && changed_service_settings {
         plan.push(step("Instalar y encender el servicio", Action::Cli { args: strings(&["gateway", "install", "--force"]), env: vec![] }));
     } else if !found.gateway_up {
         plan.push(step("Encender OpenClaw", Action::Cli { args: strings(&["gateway", "start"]), env: vec![] }));
     } else if plan.iter().any(|s| matches!(s.action, Action::Patch { .. })) && !o.service {
         plan.push(step("Reiniciar OpenClaw", Action::Cli { args: strings(&["gateway", "restart"]), env: vec![] }));
     }
-    let needs_gateway = !fresh && o.change_ai;
+    let needs_gateway = !fresh && o.change_ai && found.node_of.is_none();
     if needs_gateway {
         plan.push(step("Esperar a OpenClaw", Action::WaitGateway));
         if let Some(p) = provider {
@@ -857,14 +865,19 @@ impl SetupApp {
                 let local = detect_local();
                 let gateway_up = std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], local.port).into(), Duration::from_millis(800)).is_ok();
                 let version = cli::local_version();
+                let has_remote_profiles = AppSettings::load().profiles.iter().any(|p| p.kind != ProfileKind::Local);
+                let (node_of, node_token) = match local.remote {
+                    Some(r) => (Some(r.url), r.token),
+                    None => (None, None),
+                };
                 if let Ok(mut g) = f.lock() {
-                    *g = Found { checked: true, version, has_config: local.config_found, gateway_up, port: local.port };
+                    *g = Found { checked: true, version, has_config: local.config_found, gateway_up, port: local.port, node_of, node_token, has_remote_profiles };
                 }
                 ctx.request_repaint();
             });
         } else if let Ok(mut g) = found.lock() {
             // The picture shows a computer without OpenClaw, never this one's data.
-            *g = Found { checked: true, version: None, has_config: false, gateway_up: false, port: 18789 };
+            *g = Found { checked: true, version: None, has_config: false, gateway_up: false, port: 18789, ..Default::default() };
         }
         let auto = args.iter().any(|a| a == "--auto-install");
         Self {
@@ -909,6 +922,23 @@ impl SetupApp {
         }
         if f.version.is_some() {
             self.o.install_openclaw = false;
+        }
+        if let Some(url) = &f.node_of {
+            // This computer uses another computer's OpenClaw: manage that one.
+            self.o.use_local = false;
+            if f.has_remote_profiles {
+                self.o.use_remote = false;
+            } else {
+                self.o.use_remote = true;
+                if self.o.remotes.is_empty() && !url.is_empty() {
+                    self.o.remotes.push(RemoteDraft {
+                        name: "Gateway central".into(),
+                        url: url.clone(),
+                        secret: f.node_token.clone().unwrap_or_default(),
+                        ..Default::default()
+                    });
+                }
+            }
         }
     }
 
@@ -962,7 +992,7 @@ impl SetupApp {
     fn validate(&self, page: Page) -> Option<String> {
         match page {
             Page::Where if self.o.dir.trim().is_empty() => Some("Elige una carpeta para instalar.".into()),
-            Page::Welcome if !self.o.use_local && !self.o.use_remote => Some("Elige al menos una opción.".into()),
+            Page::Welcome if !self.o.use_local && !self.o.use_remote && !self.found().has_remote_profiles => Some("Elige al menos una opción.".into()),
             Page::Gateway if self.o.use_local && self.o.change_gateway => {
                 if self.o.port.trim().parse::<u16>().map_or(true, |p| p == 0) {
                     Some("El puerto debe ser un número entre 1 y 65535.".into())
@@ -1110,6 +1140,10 @@ impl SetupApp {
                 ui.spinner();
                 note(ui, p, "Mirando qué hay en este equipo…");
             });
+        } else if let Some(url) = &f.node_of {
+            let shown = if url.is_empty() { "otro equipo".to_string() } else { url.clone() };
+            let saved = if f.has_remote_profiles { " Tus conexiones guardadas se conservan." } else { "" };
+            note(ui, p, format!("Este equipo usa el OpenClaw de {shown} (modo nodo). No instalaré ni encenderé un OpenClaw aquí.{saved}"));
         } else {
             match (&f.version, f.has_config) {
                 (Some(v), true) => note(ui, p, format!("Encontré OpenClaw {v} ya configurado. No cambiaré nada de él a menos que lo marques.")),
@@ -1726,11 +1760,45 @@ mod tests {
     use super::*;
 
     fn fresh_found() -> Found {
-        Found { checked: true, version: None, has_config: false, gateway_up: false, port: 18789 }
+        Found { checked: true, version: None, has_config: false, gateway_up: false, port: 18789, ..Default::default() }
     }
 
     fn existing_found() -> Found {
-        Found { checked: true, version: Some("2026.11.1".into()), has_config: true, gateway_up: true, port: 18789 }
+        Found { checked: true, version: Some("2026.11.1".into()), has_config: true, gateway_up: true, port: 18789, ..Default::default() }
+    }
+
+    #[test]
+    fn a_node_of_another_gateway_never_gets_one_started() {
+        // gateway.mode = "remote": nothing listens here, and nothing should.
+        let found = Found { gateway_up: false, node_of: Some("ws://100.105.45.37:18789".into()), ..existing_found() };
+        let mut o = Options::new();
+        o.change_gateway = false;
+        o.change_ai = false;
+        o.change_bot = false;
+        o.service = false;
+        let plan = build_plan(&o, &found, None);
+        assert!(!plan.iter().any(|s| matches!(&s.action, Action::Cli { args, .. } if args[0] == "gateway")));
+        assert!(!plan.iter().any(|s| s.action == Action::WaitGateway));
+        o.service = true;
+        let plan = build_plan(&o, &found, None);
+        assert!(!plan.iter().any(|s| matches!(&s.action, Action::Cli { args, .. } if args[0] == "gateway")));
+    }
+
+    #[test]
+    fn a_node_drops_this_computer_from_the_connections() {
+        let remote = Profile { name: "Raspberry Pi".into(), url: "wss://pi:9443".into(), ..Default::default() };
+        let mut s = AppSettings { profiles: vec![Profile::local(), remote.clone()], active: "local".into(), ..Default::default() };
+        s.fit_local_profile(true);
+        assert_eq!(s.profiles.len(), 1);
+        assert_eq!(s.active, remote.id);
+        // Without another connection, "Este equipo" stays so there is something to use.
+        let mut lone = AppSettings::default();
+        lone.fit_local_profile(true);
+        assert_eq!(lone.profiles.len(), 1);
+        // A computer with its own gateway keeps it.
+        let mut own = AppSettings { profiles: vec![remote], ..Default::default() };
+        own.fit_local_profile(false);
+        assert!(own.profiles.iter().any(|p| p.kind == ProfileKind::Local));
     }
 
     #[test]

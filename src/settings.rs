@@ -144,13 +144,24 @@ impl AppSettings {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        if !s.profiles.iter().any(|p| p.kind == ProfileKind::Local) {
+        s.fit_local_profile(detect_local().is_node());
+        s
+    }
+
+    /// "Este equipo" only makes sense when this computer runs its own
+    /// gateway. On a node of another computer it is dropped, as long as
+    /// another connection is left to use.
+    pub fn fit_local_profile(&mut self, node: bool) {
+        let s = self;
+        let has_other = s.profiles.iter().any(|p| p.kind != ProfileKind::Local);
+        if node && has_other {
+            s.profiles.retain(|p| p.kind != ProfileKind::Local);
+        } else if !s.profiles.iter().any(|p| p.kind == ProfileKind::Local) {
             s.profiles.insert(0, Profile::local());
         }
         if !s.profiles.iter().any(|p| p.id == s.active) {
             s.active = s.profiles[0].id.clone();
         }
-        s
     }
 
     pub fn save(&self) {
@@ -176,6 +187,23 @@ pub struct LocalGateway {
     pub password: Option<String>,
     pub config_found: bool,
     pub note: Option<String>,
+    /// `gateway.mode = "remote"`: this computer is a node of another
+    /// computer's gateway and doesn't run one of its own.
+    pub remote: Option<RemoteGateway>,
+}
+
+/// Where a node computer's gateway lives (`gateway.remote` in the config).
+#[derive(Clone, Debug, Default)]
+pub struct RemoteGateway {
+    pub url: String,
+    pub token: Option<String>,
+}
+
+impl LocalGateway {
+    /// True when this computer uses another computer's OpenClaw.
+    pub fn is_node(&self) -> bool {
+        self.remote.is_some()
+    }
 }
 
 impl LocalGateway {
@@ -252,6 +280,14 @@ pub fn detect_local() -> LocalGateway {
             gw.token = resolve_secret(auth.and_then(|a| a.get("token")), &mut note);
             gw.password = resolve_secret(auth.and_then(|a| a.get("password")), &mut note);
             gw.note = note;
+            if g.and_then(|g| g.get("mode")).and_then(Value::as_str) == Some("remote") {
+                let remote = g.and_then(|g| g.get("remote"));
+                let mut ignored = None;
+                gw.remote = Some(RemoteGateway {
+                    url: remote.and_then(|r| r.get("url")).and_then(Value::as_str).unwrap_or_default().trim().to_string(),
+                    token: resolve_secret(remote.and_then(|r| r.get("token")), &mut ignored),
+                });
+            }
         }
     }
     if let Ok(p) = std::env::var("OPENCLAW_GATEWAY_PORT") {

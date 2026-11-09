@@ -1,6 +1,6 @@
 [package]
 name = "openclaw-bot"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "OpenClaw Bot: chats, Bots y administración de OpenClaw, local o remoto"
 license = "MIT"
