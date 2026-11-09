@@ -1,0 +1,4 @@
+# Orquestador de la flota.
+cryptography>=42      # vault cifrado
+# Opcional, sólo para 'fleet.py apply' (nodo de control Linux/WSL):
+# ansible-core>=2.16

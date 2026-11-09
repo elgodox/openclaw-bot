@@ -1,0 +1,54 @@
+# OpenClaw Fleet — servidor de control (self-hosted)
+#
+# Levanta dos cosas en TU VPS / servidor:
+#   1) Headscale  -> el "control plane" de la malla VPN (coordina las máquinas).
+#   2) RustDesk   -> hbbs (señalización) + hbbr (relay) para el control gráfico.
+#
+# Uso:
+#   1. Copiá .env.example a .env y completá FLEET_DOMAIN.
+#   2. docker compose up -d
+#   3. Creá un usuario y una pre-auth key (ver README.md).
+#
+# Todo el tráfico de las máquinas es P2P cifrado; estos servicios sólo coordinan.
+
+services:
+  headscale:
+    image: headscale/headscale:0.26.1
+    container_name: fleet-headscale
+    restart: unless-stopped
+    command: serve
+    volumes:
+      - ./headscale/config:/etc/headscale
+      - ./headscale/data:/var/lib/headscale
+    ports:
+      - "8080:8080"      # API + coordinación (poné un reverse proxy TLS delante)
+      - "9090:9090"      # métricas (opcional, no exponer a internet)
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+
+  # UI web opcional para ver/gestionar nodos y keys sin la CLI.
+  headscale-ui:
+    image: ghcr.io/gurucomputing/headscale-ui:2025.01.25
+    container_name: fleet-headscale-ui
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+
+  # --- RustDesk (control gráfico tipo TeamViewer) ---
+  rustdesk-hbbs:
+    image: rustdesk/rustdesk-server:1.1.12
+    container_name: fleet-rustdesk-hbbs
+    restart: unless-stopped
+    command: hbbs -r ${FLEET_DOMAIN}:21117
+    volumes:
+      - ./rustdesk/data:/root
+    network_mode: host    # RustDesk necesita puertos directos (21114-21119)
+
+  rustdesk-hbbr:
+    image: rustdesk/rustdesk-server:1.1.12
+    container_name: fleet-rustdesk-hbbr
+    restart: unless-stopped
+    command: hbbr
+    volumes:
+      - ./rustdesk/data:/root
+    network_mode: host

@@ -20,6 +20,7 @@
 - **Chats con tus Bots**: conversaciones, archivos adjuntos, actividad en vivo y aprobaciones de comandos (permitir una vez, siempre o rechazar).
 - **Local o remoto**: se conecta al OpenClaw de este equipo o a uno en otra máquina, por red, Tailscale o túnel SSH. Puedes guardar varias conexiones y cambiar entre ellas.
 - **Administración de OpenClaw**: modelos, canales, complementos, habilidades, rutinas, equipos, permisos, claves, uso, registros, servicio, configuración y consola.
+- **Flota**: administra tus propias máquinas (Linux y Windows) desde la app: inventario, comandos por SSH (con o sin admin), contraseñas de administrador cifradas y enrolamiento con una línea. Usa el toolkit de [`fleet/`](fleet/) (Headscale + SSH + RustDesk).
 - **Instalador con asistente**: si OpenClaw no está instalado, lo instala y lo deja configurado (proveedor de IA, primer Bot, canales).
 - **Se actualiza solo**: al abrirse busca versiones nuevas en GitHub y las instala con un clic.
 
@@ -33,6 +34,26 @@
 ![Instalador](docs/setup.png)
 
 Para desinstalar: *Configuración de Windows → Aplicaciones → OpenClaw Bot → Desinstalar*.
+
+## Flota (opcional)
+
+La sección **Flota** usa un toolkit en Python que se descarga aparte:
+
+1. Baja **`OpenClaw-Bot-Fleet.zip`** del [último release](https://github.com/elgodox/openclaw-bot/releases/latest) y descomprímelo.
+2. Monta el servidor una vez (Headscale + RustDesk con Docker): ver [fleet/README.md](fleet/README.md).
+3. En una terminal, dentro de `OpenClaw-Bot-Fleet/orchestrator`:
+
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+   ```bash
+   python fleet.py config set-server
+   ```
+
+4. En la app, *Flota → Toolkit de flota*: elige la carpeta `orchestrator` y guarda.
+
+Solo para administrar equipos propios: cada máquina se enrola con tu clave de pre-autorización y tu clave SSH.
 
 ## Actualizaciones
 

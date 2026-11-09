@@ -1,0 +1,32 @@
+# Playbook de ejemplo: configuración base que aplicás a una máquina recién enrolada.
+# Uso:  python fleet.py apply <host> ../playbooks/base-setup.yml --sudo
+#
+# Editalo con lo que necesites estandarizar en tu flota.
+- name: Configuración base de la flota
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Actualizar índice de paquetes (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: true
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: Instalar utilidades básicas
+      ansible.builtin.package:
+        name:
+          - htop
+          - curl
+          - git
+        state: present
+      become: true
+
+    - name: Asegurar zona horaria
+      community.general.timezone:
+        name: America/Argentina/Buenos_Aires
+      become: true
+      ignore_errors: true
+
+    - name: Mensaje final
+      ansible.builtin.debug:
+        msg: "Máquina {{ inventory_hostname }} configurada."

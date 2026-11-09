@@ -1,0 +1,53 @@
+# Headscale — control plane de la malla. Doc: https://headscale.net
+# Reemplazá fleet.tudominio.com por tu FLEET_DOMAIN.
+
+# URL que las máquinas usan para hablar con el control plane.
+# Si ponés un reverse proxy con TLS (recomendado), que sea https://...
+server_url: https://fleet.tudominio.com
+
+listen_addr: 0.0.0.0:8080
+metrics_listen_addr: 127.0.0.1:9090
+grpc_listen_addr: 127.0.0.1:50443
+grpc_allow_insecure: false
+
+# Clave privada del servidor (se genera sola la primera vez).
+noise:
+  private_key_path: /var/lib/headscale/noise_private.key
+
+# Rangos de IP que Headscale reparte a las máquinas de la flota.
+prefixes:
+  v4: 100.64.0.0/10
+  v6: fd7a:115c:a1e0::/48
+  allocation: sequential
+
+# DNS interno: cada máquina es alcanzable por nombre dentro de la malla.
+dns:
+  magic_dns: true
+  base_domain: fleet.internal
+  nameservers:
+    global:
+      - 1.1.1.1
+      - 9.9.9.9
+
+database:
+  type: sqlite
+  sqlite:
+    path: /var/lib/headscale/db.sqlite
+
+# Dónde guardar logs de acceso.
+log:
+  level: info
+
+# Caducidad por defecto de las pre-auth keys que generes (podés cambiarlo por key).
+ephemeral_node_inactivity_timeout: 30m
+
+# DERP: relays para cuando dos máquinas no pueden conectarse P2P directo.
+# Por defecto usa los relays públicos de Tailscale (gratis). Para 100% self-hosted
+# podés montar tu propio DERP y apuntarlo acá.
+derp:
+  server:
+    enabled: false
+  urls:
+    - https://controlplane.tailscale.com/derpmap/default
+  auto_update_enabled: true
+  update_frequency: 24h

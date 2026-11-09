@@ -25,6 +25,7 @@ pub enum Section {
     Skills,
     Routines,
     Devices,
+    Fleet,
     Approvals,
     Secrets,
     Usage,
@@ -35,7 +36,7 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Section; 16] = [
+    pub const ALL: [Section; 17] = [
         Section::Chats,
         Section::Overview,
         Section::Bots,
@@ -45,6 +46,7 @@ impl Section {
         Section::Skills,
         Section::Routines,
         Section::Devices,
+        Section::Fleet,
         Section::Approvals,
         Section::Secrets,
         Section::Usage,
@@ -65,6 +67,7 @@ impl Section {
             Section::Skills => "Habilidades",
             Section::Routines => "Rutinas",
             Section::Devices => "Equipos",
+            Section::Fleet => "Flota",
             Section::Approvals => "Permisos",
             Section::Secrets => "Claves",
             Section::Usage => "Uso",
@@ -86,6 +89,7 @@ impl Section {
             Section::Skills => "★",
             Section::Routines => "⏰",
             Section::Devices => "🖥",
+            Section::Fleet => "🛰",
             Section::Approvals => "✔",
             Section::Secrets => "🔑",
             Section::Usage => "📊",
@@ -217,6 +221,7 @@ pub struct Manager {
     pub confirm: Option<Confirm>,
     pub jobs: Jobs,
     pub forms: Forms,
+    pub fleet: crate::fleet::FleetState,
     pub log_lines: Vec<String>,
     pub log_cursor: Option<u64>,
     pub log_busy: bool,
@@ -247,6 +252,7 @@ impl Default for Manager {
             confirm: None,
             jobs: Jobs::default(),
             forms,
+            fleet: crate::fleet::FleetState::default(),
             log_lines: vec![],
             log_cursor: None,
             log_busy: false,
@@ -303,7 +309,7 @@ impl App {
             return;
         }
         match self.mgr.section {
-            Section::Chats | Section::Console => {}
+            Section::Chats | Section::Console | Section::Fleet => {}
             Section::Overview => {
                 self.fetch("health", "health", json!({}));
                 self.fetch("status", "status", json!({}));
@@ -386,6 +392,7 @@ impl App {
 
     pub fn mgr_pump(&mut self, ctx: &egui::Context) {
         self.mgr.jobs.pump();
+        self.mgr.fleet.pump(); // la flota funciona aunque no haya gateway conectado
         if !self.is_connected() {
             return;
         }
@@ -850,6 +857,44 @@ impl App {
         let c = ctx.clone();
         let id = self.mgr.jobs.run(title, &host, args, None, move || c.request_repaint());
         self.mgr.forms.job_open = Some(id);
+    }
+
+    /// Corre `fleet.py <args>` como trabajo en vivo y abre su panel de salida.
+    pub fn run_fleet(&mut self, title: &str, args: &[&str], stdin: Option<String>, ctx: &egui::Context) {
+        let cmd = match self.mgr.fleet.command(args) {
+            Ok(c) => c,
+            Err(e) => {
+                self.toast(e, false);
+                return;
+            }
+        };
+        let shown = format!("fleet.py {}", args.join(" "));
+        let c = ctx.clone();
+        let id = self.mgr.jobs.start(title, shown, cmd, stdin, move || c.request_repaint());
+        self.mgr.forms.job_open = Some(id);
+    }
+
+    /// Guarda (cifrada) la contraseña admin de un host sin exponerla en la línea de comando.
+    pub fn run_fleet_set_admin(&mut self, host: &str, admin_pw: &str, ctx: &egui::Context) {
+        let mut cmd = match self.mgr.fleet.command(&["vault", "set-admin", host]) {
+            Ok(c) => c,
+            Err(e) => {
+                self.toast(e, false);
+                return;
+            }
+        };
+        cmd.env("FLEET_ADMIN_PASSWORD", admin_pw);
+        let shown = format!("fleet.py vault set-admin {host}");
+        let c = ctx.clone();
+        let id = self.mgr.jobs.start("Guardar contraseña admin", shown, cmd, None, move || c.request_repaint());
+        self.mgr.forms.job_open = Some(id);
+    }
+
+    /// Persiste la configuración del toolkit de flota entre sesiones.
+    pub fn save_fleet_settings(&mut self) {
+        self.settings.fleet_dir = self.mgr.fleet.dir.trim().to_string();
+        self.settings.fleet_python = self.mgr.fleet.python.trim().to_string();
+        self.settings.save();
     }
 
     pub fn run_console_line(&mut self, ctx: &egui::Context) {

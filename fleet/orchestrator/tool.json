@@ -1,0 +1,42 @@
+{
+  "name": "fleet",
+  "description": "Gestiona la flota de máquinas propias: inventario, comandos remotos, configuraciones y escritorio. Ejecutar como: python fleet.py <accion>",
+  "runner": "python fleet.py",
+  "actions": [
+    {
+      "name": "list",
+      "cmd": "list --json",
+      "description": "Devuelve el inventario de máquinas (hostname, IP de malla, SO, online) en JSON."
+    },
+    {
+      "name": "enroll-cmd",
+      "cmd": "enroll-cmd {platform}",
+      "params": {"platform": "linux | win"},
+      "description": "Imprime el one-liner para enrolar una máquina nueva."
+    },
+    {
+      "name": "run",
+      "cmd": "run {host} {command}",
+      "params": {"host": "hostname o IP de la flota", "command": "comando a ejecutar"},
+      "description": "Ejecuta un comando por SSH en una máquina."
+    },
+    {
+      "name": "run-sudo",
+      "cmd": "run {host} --sudo {command}",
+      "params": {"host": "hostname", "command": "comando"},
+      "description": "Ejecuta un comando con admin/sudo (toma la contraseña del vault si hace falta)."
+    },
+    {
+      "name": "apply",
+      "cmd": "apply {host} {playbook} --sudo",
+      "params": {"host": "hostname", "playbook": "ruta a un playbook de Ansible"},
+      "description": "Aplica una configuración (playbook de Ansible) a una máquina."
+    },
+    {
+      "name": "vault-set-admin",
+      "cmd": "vault set-admin {host}",
+      "params": {"host": "hostname"},
+      "description": "Guarda (cifrada) la contraseña de admin/sudo de una máquina. Pide la contraseña de forma interactiva."
+    }
+  ]
+}

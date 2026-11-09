@@ -102,6 +102,10 @@ pub struct AppSettings {
     pub info_open: bool,
     pub notifications: bool,
     pub setup_done: bool,
+    /// Carpeta del toolkit de flota (fleet/orchestrator, donde está fleet.py).
+    pub fleet_dir: String,
+    /// Intérprete de Python para el toolkit de flota.
+    pub fleet_python: String,
 }
 
 impl Default for AppSettings {
@@ -116,6 +120,8 @@ impl Default for AppSettings {
             info_open: true,
             notifications: true,
             setup_done: false,
+            fleet_dir: String::new(),
+            fleet_python: "python".into(),
         }
     }
 }

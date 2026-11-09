@@ -121,7 +121,7 @@ pub fn rail(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
                 Section::Approvals => app.approvals.len(),
                 _ => 0,
             };
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(RAIL_WIDTH - 8.0, 48.0), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(RAIL_WIDTH - 8.0, 44.0), Sense::click());
             let fill = if selected {
                 p.selected
             } else if resp.hovered() {
@@ -132,14 +132,14 @@ pub fn rail(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
             ui.painter().rect_filled(rect, r(8), fill);
             let color = if selected { p.text } else { p.text2 };
             ui.painter().text(
-                rect.center_top() + Vec2::new(0.0, 15.0),
+                rect.center_top() + Vec2::new(0.0, 14.0),
                 egui::Align2::CENTER_CENTER,
                 section.glyph(),
                 egui::FontId::proportional(17.0),
                 color,
             );
             ui.painter().text(
-                rect.center_bottom() - Vec2::new(0.0, 11.0),
+                rect.center_bottom() - Vec2::new(0.0, 10.0),
                 egui::Align2::CENTER_CENTER,
                 section.title(),
                 egui::FontId::proportional(10.5),
@@ -202,7 +202,7 @@ fn offline(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
 
 pub fn central(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
     let section = app.mgr.section;
-    let works_offline = matches!(section, Section::Maintenance | Section::Console | Section::Config);
+    let works_offline = matches!(section, Section::Maintenance | Section::Console | Section::Config | Section::Fleet);
     Frame::new().fill(p.bg).inner_margin(Margin::symmetric(26, 20)).show(ui, |ui| {
         ui.set_min_height(ui.available_height());
         if !app.is_connected() && !works_offline {
@@ -220,6 +220,7 @@ pub fn central(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
             Section::Skills => skills(app, ui, p),
             Section::Routines => routines(app, ui, p),
             Section::Devices => devices(app, ui, p),
+            Section::Fleet => fleet(app, ui, p),
             Section::Approvals => approvals(app, ui, p),
             Section::Secrets => secrets(app, ui, p),
             Section::Usage => usage(app, ui, p),
@@ -1067,6 +1068,207 @@ fn devices(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
 }
 
 // ---- permissions --------------------------------------------------------------
+
+fn fleet(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
+    let ctx = ui.ctx().clone();
+    page_header(app, ui, p, "Flota", "Tus máquinas: enrolar, inventario, comandos y escritorio remoto");
+    let configured = app.mgr.fleet.is_configured();
+
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        // Configuración del toolkit.
+        card(ui, p, |ui| {
+            title(ui, "Toolkit de flota");
+            muted(ui, p, "Carpeta orchestrator del toolkit (OpenClaw-Bot-Fleet.zip, en cada versión de GitHub) y el Python a usar.");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label("Carpeta:");
+                ui.add(TextEdit::singleline(&mut app.mgr.fleet.dir).desired_width(340.0).hint_text("…/OpenClaw-Bot-Fleet/orchestrator"));
+                if ui.button("Elegir…").clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        app.mgr.fleet.dir = dir.display().to_string();
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Python:");
+                ui.add(TextEdit::singleline(&mut app.mgr.fleet.python).desired_width(140.0).hint_text("python"));
+                if ui.button("Guardar").clicked() {
+                    app.save_fleet_settings();
+                    app.toast("Configuración de flota guardada.", true);
+                }
+            });
+            if !configured {
+                ui.add_space(4.0);
+                muted(ui, p, "Todavía no encuentro fleet.py en esa carpeta.");
+            }
+        });
+        ui.add_space(10.0);
+
+        if let Some(err) = app.mgr.fleet.error.clone() {
+            card(ui, p, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(err).color(p.red));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Ocultar").clicked() {
+                            app.mgr.fleet.error = None;
+                        }
+                        if app.mgr.fleet.missing_deps && ui.button("Instalar dependencias").clicked() {
+                            match app.mgr.fleet.install_deps_command() {
+                                Ok(cmd) => {
+                                    let c = ctx.clone();
+                                    let id = app.mgr.jobs.start("Instalar dependencias de la flota", "python -m pip install -r requirements.txt".into(), cmd, None, move || c.request_repaint());
+                                    app.mgr.forms.job_open = Some(id);
+                                    app.mgr.fleet.error = None;
+                                    app.mgr.fleet.missing_deps = false;
+                                }
+                                Err(e) => app.mgr.fleet.error = Some(e),
+                            }
+                        }
+                    });
+                });
+            });
+            ui.add_space(10.0);
+        }
+
+        // Passphrase del vault (sólo en memoria).
+        card(ui, p, |ui| {
+            title(ui, "Vault");
+            muted(ui, p, "Passphrase maestra para abrir el vault de contraseñas admin. Sólo en esta sesión.");
+            ui.horizontal(|ui| {
+                ui.label("Passphrase:");
+                ui.add(TextEdit::singleline(&mut app.mgr.fleet.passphrase).password(true).desired_width(240.0));
+            });
+        });
+        ui.add_space(10.0);
+
+        // Inventario.
+        card(ui, p, |ui| {
+            ui.horizontal(|ui| {
+                title(ui, "Inventario");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add_enabled(configured && !app.mgr.fleet.loading, Button::new("Actualizar")).clicked() {
+                        let c = ctx.clone();
+                        app.mgr.fleet.refresh(move || c.request_repaint());
+                    }
+                    if app.mgr.fleet.loading {
+                        ui.label(RichText::new("Cargando…").color(p.amber).size(12.0));
+                    }
+                });
+            });
+            ui.add_space(4.0);
+            if app.mgr.fleet.machines.is_empty() {
+                if app.mgr.fleet.loaded_once {
+                    empty(ui, p, "No hay máquinas enroladas todavía. Usá «Enrolar una máquina» abajo.");
+                } else {
+                    muted(ui, p, "Tocá «Actualizar» para leer el inventario desde Headscale.");
+                }
+            } else {
+                for m in app.mgr.fleet.machines.clone() {
+                    Frame::new().fill(p.field).corner_radius(r(6)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            dot(ui, if m.online { p.green } else { p.text3 });
+                            ui.label(RichText::new(&m.hostname).strong());
+                            ui.label(RichText::new(format!("{}  ·  {}", m.mesh_ip, m.os)).color(p.text2).size(12.0));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.small_button("Usar").on_hover_text("Elegir como destino de comandos").clicked() {
+                                    app.mgr.fleet.target = m.hostname.clone();
+                                }
+                            });
+                        });
+                    });
+                    ui.add_space(4.0);
+                }
+            }
+        });
+        ui.add_space(10.0);
+
+        // Ejecutar comando por SSH.
+        card(ui, p, |ui| {
+            title(ui, "Ejecutar en una máquina");
+            ui.horizontal(|ui| {
+                ui.label("Destino:");
+                ui.add(TextEdit::singleline(&mut app.mgr.fleet.target).desired_width(180.0).hint_text("hostname"));
+                ui.checkbox(&mut app.mgr.fleet.use_sudo, "con admin/sudo");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Comando:");
+                ui.add(TextEdit::singleline(&mut app.mgr.fleet.command).desired_width(340.0).hint_text("uptime"));
+                let ready = configured
+                    && !app.mgr.fleet.target.trim().is_empty()
+                    && !app.mgr.fleet.command.trim().is_empty();
+                if ui.add_enabled(ready, Button::new("Ejecutar")).clicked() {
+                    let host = app.mgr.fleet.target.trim().to_string();
+                    let cmdline = app.mgr.fleet.command.trim().to_string();
+                    let sudo = app.mgr.fleet.use_sudo;
+                    // --sudo va antes del host: después, argparse lo tomaría como parte del comando.
+                    let mut args: Vec<&str> = vec!["run"];
+                    if sudo {
+                        args.push("--sudo");
+                    }
+                    args.push(&host);
+                    args.push(&cmdline); // el comando viaja como un solo argumento
+                    app.run_fleet("Comando remoto", &args, None, &ctx);
+                }
+            });
+            muted(ui, p, "La salida aparece abajo, en vivo.");
+        });
+        ui.add_space(10.0);
+
+        // Vault: guardar contraseña de admin.
+        card(ui, p, |ui| {
+            title(ui, "Guardar contraseña de administrador");
+            muted(ui, p, "Para máquinas que piden admin/sudo. Se guarda cifrada en el vault.");
+            ui.horizontal(|ui| {
+                ui.label("Host:");
+                ui.add(TextEdit::singleline(&mut app.mgr.fleet.vault_host).desired_width(150.0).hint_text("hostname"));
+                ui.label("Contraseña:");
+                ui.add(TextEdit::singleline(&mut app.mgr.fleet.vault_pw).password(true).desired_width(170.0));
+                let ready = configured
+                    && !app.mgr.fleet.vault_host.trim().is_empty()
+                    && !app.mgr.fleet.vault_pw.is_empty()
+                    && !app.mgr.fleet.passphrase.is_empty();
+                if ui.add_enabled(ready, Button::new("Guardar")).clicked() {
+                    let host = app.mgr.fleet.vault_host.trim().to_string();
+                    let pw = std::mem::take(&mut app.mgr.fleet.vault_pw);
+                    app.run_fleet_set_admin(&host, &pw, &ctx);
+                }
+            });
+            if app.mgr.fleet.passphrase.is_empty() {
+                muted(ui, p, "Primero cargá la passphrase maestra del vault, arriba.");
+            }
+        });
+        ui.add_space(10.0);
+
+        // Enrolar una máquina nueva.
+        card(ui, p, |ui| {
+            title(ui, "Enrolar una máquina");
+            muted(ui, p, "Generá el comando de instalación y corrélo en la máquina nueva.");
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut app.mgr.fleet.enroll_platform, 0, "Linux");
+                ui.selectable_value(&mut app.mgr.fleet.enroll_platform, 1, "Windows");
+                if ui.add_enabled(configured, Button::new("Generar comando")).clicked() {
+                    let c = ctx.clone();
+                    app.mgr.fleet.refresh_enroll(move || c.request_repaint());
+                }
+            });
+            if !app.mgr.fleet.enroll_cmd.is_empty() {
+                ui.add_space(4.0);
+                Frame::new().fill(p.field).corner_radius(r(6)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                    ui.label(RichText::new(&app.mgr.fleet.enroll_cmd).monospace().size(11.5));
+                });
+                if ui.small_button("Copiar").clicked() {
+                    ui.ctx().copy_text(app.mgr.fleet.enroll_cmd.clone());
+                }
+            }
+        });
+        ui.add_space(10.0);
+
+        // Salida en vivo de los comandos (reusa el panel de trabajos).
+        if app.mgr.forms.job_open.is_some() {
+            job_view(app, ui, p);
+        }
+    });
+}
 
 fn approvals(app: &mut App, ui: &mut egui::Ui, p: &Palette) {
     page_header(app, ui, p, "Permisos", "Qué pueden hacer tus Bots sin preguntar");

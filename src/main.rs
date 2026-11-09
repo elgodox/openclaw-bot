@@ -4,6 +4,7 @@
 mod app;
 mod cli;
 mod config_edit;
+mod fleet;
 mod gateway;
 #[cfg(test)]
 mod gateway_tests;

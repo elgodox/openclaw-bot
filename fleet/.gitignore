@@ -1,0 +1,8 @@
+# NUNCA versionar secretos ni estado del servidor.
+vault/vault.enc
+vault/vault.salt
+orchestrator/config.json
+server/.env
+server/headscale/data/
+server/rustdesk/data/
+__pycache__/

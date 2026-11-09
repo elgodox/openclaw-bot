@@ -222,6 +222,11 @@ impl App {
             screenshot_sent: false,
             screenshot_done: Arc::new(AtomicBool::new(false)),
         };
+        // Toolkit de flota: recordar carpeta e intérprete entre sesiones.
+        app.mgr.fleet.dir = app.settings.fleet_dir.clone();
+        if !app.settings.fleet_python.trim().is_empty() {
+            app.mgr.fleet.python = app.settings.fleet_python.clone();
+        }
         if demo {
             app.fill_demo();
         } else {
