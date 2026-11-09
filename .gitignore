@@ -1,0 +1,7 @@
+/target
+/dist
+*.pdb
+# Notas internas de la reconstrucción (no se publican)
+/MECHANICS.md
+/mechanics.json
+/shots

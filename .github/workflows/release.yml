@@ -1,0 +1,61 @@
+name: Release
+
+# Publica una versión nueva: sube la versión en Cargo.toml, haz commit y
+#   git tag v1.2.3 && git push origin v1.2.3
+# Este flujo compila el instalador, lo adjunta al release y las apps
+# instaladas lo detectan y se actualizan solas.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprobar que la etiqueta coincide con Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::La etiqueta ${GITHUB_REF_NAME} no coincide con la versión $version de Cargo.toml"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        run: cargo test --release --locked
+
+      - name: Compilar
+        run: cargo build --release --locked
+
+      - name: Preparar el instalador
+        shell: bash
+        run: |
+          mkdir -p out
+          cp target/release/openclaw-bot.exe out/OpenClaw-Bot-Setup.exe
+          (cd out && sha256sum OpenClaw-Bot-Setup.exe > SHA256SUMS.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenClaw-Bot-Setup
+          path: out/*
+
+      - name: Publicar el release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" out/OpenClaw-Bot-Setup.exe out/SHA256SUMS.txt \
+            --title "OpenClaw Bot ${GITHUB_REF_NAME}" \
+            --generate-notes
